@@ -1,0 +1,83 @@
+name: Common Build Workflow
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [dependency_updated]
+
+jobs:
+  who-triggered-me:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Who triggered me?
+        run: |
+          echo "### This pipeline trigger summary 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "I was triggered by ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            echo "Triggered: ${{ github.event.client_payload.triggered_by }}" >> $GITHUB_STEP_SUMMARY
+            echo '`repository_dispatch` payload:' >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            echo '${{ toJson(github.event.client_payload) }}' | jq . >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "Manual trigger" >> $GITHUB_STEP_SUMMARY
+          fi
+
+
+  build_frontend:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: my-nodejs-app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: pde-build-demo/source-code-frontend
+      - run: npm install
+      - run: npm test
+  
+  build_backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: my-dotnet-app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: pde-build-demo/source-code-backend
+      - run: dotnet build src/my-dotnet-app.csproj
+      - run: dotnet pack src/my-dotnet-app.csproj --output output
+      - uses: actions/upload-artifact@v4
+        with:
+          name: my-dotnet-app
+          path: my-dotnet-app/output/*.nupkg 
+
+  build_microservice:
+    permissions:
+      contents: read
+    uses: pde-build-demo/micro-service/.github/workflows/build.yml@main
+            
+  test_backend:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: my-dotnet-app
+    needs: build_backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: pde-build-demo/source-code-backend
+      - run: dotnet test tests/my-dotnet-app.tests.csproj
+      
+  deploy-all:
+    runs-on: ubuntu-latest
+    needs: [build_frontend, test_backend, build_microservice]
+    environment: production
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: my-dotnet-app
+          path: application
+      - run: |
+          pushd application
+          echo "Deploying application"
+          ls -la
